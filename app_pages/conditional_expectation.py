@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from survival import expected_months, rebased_curve
+from survival import area_under, rebased_curve
 from ui import PALETTE, callout, section
 
 # Subscribers still here at the start of each month, out of 100 who joined.
@@ -109,7 +109,7 @@ def share_chart(shares: list[float], reached: int) -> go.Figure:
 curve = pd.Series(STILL_HERE, index=range(len(STILL_HERE))) / STILL_HERE[0]
 window = rebased_curve(curve, TODAY, MONTHS_AHEAD)
 shares = window.iloc[:-1].tolist()
-remaining = expected_months(window)
+remaining = area_under(window)
 reached = STILL_HERE[TODAY]
 
 st.html(

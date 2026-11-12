@@ -1,112 +1,38 @@
 """Page 2: lifetime value from a Kaplan–Meier survival curve."""
 
-import math
-
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from data import PLANS, generate_subscribers
-from survival import HORIZON_MONTHS, expected_months, kaplan_meier, rebased_curve, survival_at
-from ui import PALETTE, callout, section
-
-CHART_MONTHS = 72
-# Beyond this tenure the horizon would reach past the part of the curve shown here.
-MAX_TENURE = CHART_MONTHS - HORIZON_MONTHS
-HORIZON_YEARS = HORIZON_MONTHS // 12
-AREA_FILL = "rgba(234, 88, 12, 0.20)"
-CHART_CONFIG = {"displayModeBar": False, "staticPlot": True}
-
-
-@st.cache_data
-def load_curve() -> tuple[pd.Series, int]:
-    """Kaplan–Meier curve of the synthetic subscribers, and how many there are."""
-    subscribers = generate_subscribers()
-    return kaplan_meier(subscribers), len(subscribers)
-
-
-def survival_chart() -> go.Figure:
-    """Empty chart with the shared survival axes."""
-    fig = go.Figure()
-    fig.update_xaxes(
-        title_text="Months since joining", range=[-1.5, CHART_MONTHS + 3],
-        tickvals=list(range(0, CHART_MONTHS + 1, 12)),
-        showgrid=True, gridcolor=PALETTE["line"], zeroline=False,
-        tickfont={"size": 15, "color": PALETTE["muted"]},
-        title_font={"size": 15, "color": PALETTE["muted"]},
-    )
-    fig.update_yaxes(
-        title_text="Still subscribed", range=[0, 1.06],
-        tickvals=[0, 0.25, 0.5, 0.75, 1], tickformat=".0%",
-        showgrid=True, gridcolor=PALETTE["line"], zeroline=False,
-        tickfont={"size": 15, "color": PALETTE["muted"]},
-        title_font={"size": 15, "color": PALETTE["muted"]},
-    )
-    fig.update_layout(
-        height=430,
-        margin={"l": 10, "r": 10, "t": 50, "b": 10},
-        showlegend=False,
-        plot_bgcolor="#FFFFFF",
-        paper_bgcolor="#FFFFFF",
-    )
-    return fig
-
-
-def add_curve(fig: go.Figure, curve: pd.Series, color: str, width: int) -> None:
-    fig.add_trace(go.Scatter(
-        x=curve.index, y=curve, mode="lines", hoverinfo="skip",
-        line={"color": color, "width": width, "shape": "hv"},
-    ))
-
-
-def add_area(fig: go.Figure, window: pd.Series, caption: str) -> None:
-    """Shade the area under a curve and label it with the months it adds up to."""
-    fig.add_trace(go.Scatter(
-        x=window.index, y=window, mode="lines", hoverinfo="skip",
-        line={"width": 0, "shape": "hv"}, fill="tozeroy", fillcolor=AREA_FILL,
-    ))
-    fig.add_annotation(
-        x=(window.index[0] + window.index[-1]) / 2, y=0.22, showarrow=False,
-        text=f"<b>{expected_months(window):.1f} months</b><br>{caption}",
-        font={"size": 19, "color": PALETTE["orange"]},
-    )
-
-
-def add_marker_line(fig: go.Figure, month: float, label: str, dash: str) -> None:
-    fig.add_vline(x=month, line_color=PALETTE["ink"], line_width=2, line_dash=dash)
-    fig.add_annotation(
-        x=month, y=1.09, yref="paper", text=label, showarrow=False,
-        font={"size": 15, "color": PALETTE["ink"]},
-    )
+import loaders
+from charts import (
+    CHART_CONFIG, HORIZON_YEARS, MAX_TENURE, add_area, add_curve, add_marker_line, add_today, survival_chart,
+)
+from data import PLANS
+from survival import HORIZON_MONTHS, curve_window
+from ui import PALETTE, callout, dollars, remaining_months_tiles, section
 
 
 def lifetime_chart(curve: pd.Series) -> go.Figure:
     """The survival curve, with the area under its first years shaded."""
     fig = survival_chart()
-    add_area(fig, rebased_curve(curve, 0), "area under the curve")
+    add_area(fig, curve_window(curve, 0), decimals=1)
     add_curve(fig, curve, PALETTE["pink"], 4)
     add_marker_line(fig, HORIZON_MONTHS, f"{HORIZON_YEARS} years", "dot")
     return fig
 
 
-def remaining_chart(curve: pd.Series, tenure: int) -> go.Figure:
-    """The same curve, restarted at 100% for a subscriber who has reached `tenure`."""
-    window = rebased_curve(curve, tenure)
+def remaining_chart(curve: pd.Series, window: pd.Series) -> go.Figure:
+    """The two numbers behind the remaining months: the area ahead, and the share still here today."""
     fig = survival_chart()
-    add_curve(fig, curve, PALETTE["faint"], 3)
-    add_area(fig, window, "expected remaining")
-    add_curve(fig, window, PALETTE["pink"], 4)
-    fig.add_trace(go.Scatter(
-        x=[tenure, tenure], y=[survival_at(curve, tenure), 1], mode="markers", hoverinfo="skip",
-        marker={"size": 13, "color": [PALETTE["faint"], PALETTE["pink"]],
-                "line": {"color": "#FFFFFF", "width": 2}},
-    ))
-    add_marker_line(fig, tenure, "<b>Today</b>", "solid")
-    add_marker_line(fig, tenure + HORIZON_MONTHS, f"+{HORIZON_YEARS} years", "dot")
+    add_area(fig, window, decimals=2)
+    add_curve(fig, curve, PALETTE["pink"], 4)
+    add_today(fig, window)
     return fig
 
 
-curve, subscriber_count = load_curve()
+curve = loaders.kaplan_meier_curve()
+subscriber_count = len(loaders.subscribers())
 
 st.html(
     """
@@ -127,28 +53,26 @@ with st.container(border=True):
     st.plotly_chart(lifetime_chart(curve), width="stretch", config=CHART_CONFIG)
 st.html(f'<div class="note">Kaplan–Meier estimate from {subscriber_count:,} synthetic subscribers</div>')
 
-heading = st.container()
+section(
+    "2 · Already subscribed? Count only the months ahead.",
+    f"Take the area under the next {HORIZON_YEARS} years of the curve, "
+    "then divide by the share of subscribers who are still here today.",
+)
 tenure = st.slider("Months already subscribed", 0, MAX_TENURE, 12)
-with heading:
-    if tenure == 0:
-        reached = "A new subscriber starts at 100%."
-    else:
-        reached = (
-            f"{survival_at(curve, tenure):.0%} of subscribers reach month {tenure}. "
-            "For them, the curve restarts at 100%."
-        )
-    section("2 · Already subscribed? Start from today.", reached)
+window = curve_window(curve, tenure)
 with st.container(border=True):
-    st.plotly_chart(remaining_chart(curve, tenure), width="stretch", config=CHART_CONFIG)
+    st.plotly_chart(remaining_chart(curve, window), width="stretch", config=CHART_CONFIG)
+months = remaining_months_tiles(window)
+st.html(
+    '<div class="note">The area is an average over everyone who joined. '
+    "Dividing by the share still here turns it into an average over those who remain.</div>"
+)
 
 section("3 · Turn months into value")
 plan = st.radio(
     "Plan", list(PLANS), index=1, horizontal=True,
     format_func=lambda name: f"{name} · \\${PLANS[name]}",
 )
-# Value is computed from the rounded months so the three tiles multiply out exactly as shown.
-months = round(expected_months(rebased_curve(curve, tenure)), 1)
-lifetime_value = math.floor(PLANS[plan] * months + 0.5)
 subscriber = "for a new subscriber" if tenure == 0 else f"after {tenure} months subscribed"
 st.html(
     f"""
@@ -167,7 +91,7 @@ st.html(
         <div class="operator">=</div>
         <div class="term" style="--accent: {PALETTE['green']}">
             <span class="tag">Lifetime value</span>
-            <div class="value">${lifetime_value:,}</div>
+            <div class="value">{dollars(PLANS[plan] * months)}</div>
             <div class="hint">over the next {HORIZON_YEARS} years</div>
         </div>
     </div>
@@ -177,5 +101,5 @@ st.html(
 callout(
     "🧩",
     "The limit",
-    "Same tenure, same curve, whoever the subscriber is. The Cox model will make it personal.",
+    "Same tenure, same curve, whoever the subscriber is. The Cox model makes it personal.",
 )

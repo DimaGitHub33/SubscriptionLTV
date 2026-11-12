@@ -4,14 +4,13 @@
 
 ### How much is each subscriber still worth?
 
-Predicting customer lifetime value for a subscription service with **survival analysis**,<br/>
+Predicting customer lifetime value (LTV) for a subscription business with **survival analysis**,<br/>
 explained step by step in an interactive **Streamlit** app.
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Baseline](https://img.shields.io/badge/Baseline-Kaplan--Meier-DB2777?style=for-the-badge)
-![Next](https://img.shields.io/badge/Next-Cox%20Proportional%20Hazards-7C3AED?style=for-the-badge)
+![Model](https://img.shields.io/badge/Model-Cox%20Proportional%20Hazards-7C3AED?style=for-the-badge)
 ![App](https://img.shields.io/badge/App-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
-![Status](https://img.shields.io/badge/Status-In%20progress-F59E0B?style=for-the-badge)
 
 </div>
 
@@ -19,17 +18,18 @@ explained step by step in an interactive **Streamlit** app.
 
 ## 🎯 The idea
 
-A subscription earns money only while the customer stays, so a subscriber's future value is:
+A subscription earns money only while the customer stays. So what a customer is still worth is:
 
 ```math
-\text{LTV} = \text{monthly revenue} \times \text{expected remaining months}
+\text{LTV} = \text{monthly price} \times \text{expected remaining months}
 ```
 
-The monthly revenue is known. The remaining months are not, and estimating them is the whole problem.
+The price is known. The remaining months are not: most customers are still active, so nobody knows yet when they will leave. **Survival analysis** is built for exactly that, and this project uses two of its models.
 
-> [!NOTE]
-> **Why survival analysis?**
-> An active subscriber has not cancelled *yet*, so their final subscription length is unknown. We only know it is *at least* their current tenure. Survival analysis uses that partial information correctly. Dropping active subscribers, or treating their current tenure as final, would understate how long subscribers stay.
+| | Model | What it gives |
+| :---: | --- | --- |
+| 🩷 | **Kaplan–Meier** | One survival curve shared by all customers |
+| 🟣 | **Cox** | A survival curve for each customer, based on their traits |
 
 ---
 
@@ -45,6 +45,7 @@ streamlit run app.py
 | 🎯 **The problem** | What we want to predict, and why the future is the hard part |
 | 📉 **Kaplan–Meier** | The survival curve, the area under it, and the LTV for any tenure and plan |
 | 🧮 **Step by step** | The same calculation on 100 subscribers, one visual step at a time |
+| 👤 **Cox model** | The method applied to JFrog: from a company's traits to its predicted LTV |
 
 ---
 
@@ -52,70 +53,33 @@ streamlit run app.py
 
 ```mermaid
 flowchart LR
-    A["<b>1 · Subscriber data</b><br/>tenure, churn flag, price"]:::data
-    B["<b>2 · Kaplan–Meier</b><br/>one survival curve for everyone"]:::baseline
-    C["<b>Cox model · planned</b><br/>one curve per subscriber"]:::planned
-    D["<b>3 · Remaining months</b><br/>given current tenure, next 36 months"]:::months
-    E["<b>4 · LTV</b><br/>months × monthly revenue"]:::value
+    A["<b>1 · Customer data</b><br/>who stayed, who left, for how long"]:::data
+    B["<b>2 · Survival curve</b><br/>Kaplan–Meier or Cox"]:::model
+    C["<b>3 · Expected months</b><br/>the area under the curve"]:::months
+    D["<b>4 · LTV</b><br/>months × monthly price"]:::value
 
-    A --> B --> D
-    A -.-> C -.-> D
-    D --> E
+    A --> B --> C --> D
 
     classDef data fill:#2563EB,stroke:#1E40AF,color:#FFFFFF
-    classDef baseline fill:#DB2777,stroke:#9D174D,color:#FFFFFF
-    classDef planned fill:#FFFFFF,stroke:#7C3AED,color:#7C3AED,stroke-dasharray: 6 4
+    classDef model fill:#7C3AED,stroke:#5B21B6,color:#FFFFFF
     classDef months fill:#EA580C,stroke:#9A3412,color:#FFFFFF
     classDef value fill:#16A34A,stroke:#166534,color:#FFFFFF
 ```
 
-### 🔵 1 · Subscriber data
+**1 · Customer data.** For each customer: how many months they have been subscribed, and whether they have already left. Customers who are still active count too.
 
-5,000 synthetic subscribers of a service that has been running for 84 months. About half have already cancelled.
+**2 · Survival curve.** The share of customers still subscribed after each month.
 
-| Column | Meaning |
-| --- | --- |
-| `plan`, `monthly_price` | Basic $10, Standard $15 or Premium $20 |
-| `channel`, `promo_signup`, `weekly_hours` | How they joined and how much they use the service |
-| `tenure_months` | Months subscribed so far |
-| `churned` | `1` if the subscriber cancelled, `0` if still active |
+- **Kaplan–Meier** draws one curve for everyone.
+- **Cox** gives each customer their own curve. Every trait multiplies the risk of leaving up or down.
 
-Churn times are drawn from a known risk model, so a fitted model can later be checked against the true effects.
+**3 · Expected months.** The area under the curve is the expected time as a customer. For someone who has already stayed a while, only the months ahead count:
 
-### 🩷 2 · Kaplan–Meier survival curve
-
-Kaplan–Meier asks one thing at every point in time: of the subscribers who were still here, what share stayed? Multiplying those shares gives the survival curve, the probability of still being subscribed after *t* months.
-
-```math
-\hat{S}(t) = \prod_{t_i \le t} \left(1 - \frac{d_i}{n_i}\right)
+```text
+Expected remaining months = area under the curve after today ÷ share of customers still here today
 ```
 
-| Symbol | Meaning |
-| --- | --- |
-| `nᵢ` | Subscribers still here just before time *tᵢ* |
-| `dᵢ` | Subscribers among them who cancelled at *tᵢ* |
-
-Active subscribers count in `nᵢ` for as long as they have been observed, and are never treated as churned.
-
-### 🟠 3 · Expected remaining months
-
-A subscriber who has reached month *t₀* has already survived everything before it. So the curve is cut at *t₀* and rescaled to start again at 100%:
-
-```math
-S(t_0 + u \mid T > t_0) = \frac{S(t_0 + u)}{S(t_0)}
-```
-
-The area under this re-based curve over the next 36 months is the expected time the subscriber will still be here:
-
-```math
-\text{Expected remaining months} = \int_{0}^{36} \frac{S(t_0 + u)}{S(t_0)} \, du
-```
-
-### 🟢 4 · LTV
-
-```math
-\text{LTV} = \text{monthly revenue} \times \text{expected remaining months}
-```
+**4 · LTV.** Multiply the expected months by the monthly price.
 
 ---
 
@@ -123,7 +87,7 @@ The area under this re-based curve over the next 36 months is the expected time 
 
 100 subscribers join. Each month fewer are still here: **100, 70, 50, 40, 30, 25**.
 
-Today is month 2, so **50** subscribers are still here, and we look 4 months ahead.
+Today is month 2, so **50** are still here. Looking 4 months ahead:
 
 | Month from today | Still here | Share of today's 50 |
 | :---: | :---: | :---: |
@@ -137,15 +101,13 @@ Expected remaining months = 1.0 + 0.8 + 0.6 + 0.5 = 2.9
 LTV at $15 a month        = 2.9 × $15             = $43.50
 ```
 
-Each month is one unit wide, so adding the shares is the same as measuring the area under the curve.
-
 ---
 
-## 📊 What the baseline says
+## 📊 Results with Kaplan–Meier
 
-Kaplan–Meier results on the synthetic data, over a 36-month horizon:
+5,000 simulated subscribers, looking 36 months ahead, on a $15 plan:
 
-| Months already subscribed | Subscribers who get this far | Expected remaining months | LTV on Standard ($15) |
+| Months already subscribed | Subscribers who get this far | Expected remaining months | LTV |
 | :---: | :---: | :---: | :---: |
 | 0 | 100% | 23.4 | $351 |
 | 12 | 69% | 27.3 | $410 |
@@ -157,30 +119,41 @@ Kaplan–Meier results on the synthetic data, over a 36-month horizon:
 
 ---
 
-## 🟣 Next: the Cox model
+## 🐸 Applied to JFrog
 
-Kaplan–Meier gives **one curve for everyone**: two subscribers with the same tenure get the same forecast, whatever their plan or behaviour. The Cox proportional hazards model removes that limit by scaling a shared underlying risk with each subscriber's features:
+The fourth page applies the method to [JFrog](https://jfrog.com), in four steps.
 
-```math
-h(t \mid x) = h_0(t) \cdot \exp(\beta^\top x)
-\qquad\Longrightarrow\qquad
-S(t \mid x) = S_0(t)^{\exp(\beta^\top x)}
-```
+> [!IMPORTANT]
+> **An illustration.** The facts about JFrog are public and linked below. The companies, prices and forecasts are made up, and the method is my own proposal.
 
-Each coefficient reads as a **hazard ratio**: 1.5 means 50% higher churn risk at any moment, 0.7 means 30% lower.
+**1 · Why a survival model?** JFrog reported a gross retention of **97%** for the third quarter of 2026 ([earnings call][call]). Customers rarely leave, so most are still active and how long they will stay is not known yet.
 
-In the small example above, a subscriber with twice the churn risk would have each share raised to the power of 2:
+**2 · A simple formula.** Each company pays a fixed annual price, divided by 12 to get a monthly price:
 
 ```text
-Expected remaining months = 1.0² + 0.8² + 0.6² + 0.5² = 2.25   (instead of 2.9)
+Predicted LTV = monthly price × expected months as a customer
 ```
 
-| | 🩷 Kaplan–Meier | 🟣 Cox |
+**3 · What goes into the model.** Five things we would know about each company:
+
+| Company trait | Public information about JFrog | My assumption for the demo |
 | --- | --- | --- |
-| **Survival curve** | One for everyone | One per subscriber |
-| **Explains churn** | No | Yes, through hazard ratios |
-| **Assumptions** | None about the curve | Proportional hazards |
-| **Status** | Built | Planned |
+| 📦 **Subscription plan** | Plans such as Pro, Enterprise X and Enterprise+ ([pricing][pricing]) | Companies on higher plans stay longer |
+| 🌐 **Where it runs** | In JFrog's cloud, or hosted by the customer ([10-Q][10q]) | Cloud customers leave a little more easily |
+| 🏢 **Company size** | Customers include over 80% of the Fortune 100 ([home page][home]) | Large companies stay longer |
+| 🧩 **Products in use** | Security and other products are added on top of Artifactory ([pricing][pricing]) | Each extra product lowers the risk of leaving |
+| 📉 **Usage trend** | Cloud subscriptions can include usage-based fees ([10-Q][10q]) | Falling usage is a warning sign |
+
+**4 · A forecast for every company.** Company traits → Cox model → expected months → predicted LTV.
+
+| Company | Main traits | Monthly price | Expected months | Predicted LTV |
+| --- | --- | :---: | :---: | :---: |
+| **A** · Small team | Pro, cloud, usage falling | $200 | 23.6 | $4,720 |
+| **B** · Growing scale-up | Enterprise X, cloud, 2 products | $1,000 | 31.9 | $31,900 |
+| **C** · Large enterprise | Enterprise+, self-managed, 3 products | $10,000 | 34.7 | $347,000 |
+| **D** · Enterprise at risk | Enterprise+, cloud, usage falling | $10,000 | 30.6 | $306,000 |
+
+Companies C and D pay the same price and are still worth different amounts. The Cox model tells them apart.
 
 ---
 
@@ -192,40 +165,35 @@ app_pages/
     problem.py                  Page 1 · The problem
     kaplan_meier.py             Page 2 · Kaplan–Meier curve and LTV
     conditional_expectation.py  Page 3 · The calculation, step by step
-data.py                         Synthetic subscriber generator
-survival.py                     Survival curve, re-basing and area under the curve
+    cox.py                      Page 4 · Cox model, applied to JFrog
+data.py                         Simulated subscribers for the Kaplan–Meier page
+jfrog.py                        Simulated companies for the Cox page
+survival.py                     Kaplan–Meier, Cox, and the area under a survival curve
+charts.py                       Survival charts shared by the pages
+loaders.py                      Cached data for the pages
 ui.py                           Shared colours and page components
 ```
 
 ---
 
-## ⚙️ Design choices
+## ⚠️ Good to know
 
-| Choice | Decision | Why |
-| --- | --- | --- |
-| **Baseline** | Kaplan–Meier | Simple, assumes nothing about the shape of the curve, and shows what a richer model adds |
-| **Horizon** | 36 months | A survival curve rarely reaches zero inside the observed data, so the forecast needs a clear cut-off |
-| **Discounting** | None | Keeps LTV directly readable as months × price |
-| **Data** | Synthetic | The true churn drivers are known, so models can be validated against them |
+- **Simulated data.** Every customer in this project is made up. The figures show how the method works, not real business results.
+- **36-month horizon.** Months beyond the next 3 years are not counted, so LTV is a cautious estimate.
+- **Fixed price, no discounting.** The price never changes, and a future dollar counts the same as a dollar today.
+- **Cox assumption.** The Cox model assumes each trait changes the risk of leaving by the same factor at every tenure. That holds here because the data was simulated that way. With real data it has to be tested.
 
 ---
 
-## ⚠️ Assumptions and limits
+## 📚 Sources
 
-- **Synthetic data.** The project demonstrates the method. The figures are not results from a real business.
-- **Bounded value.** Revenue beyond 36 months is not counted, so LTV is a deliberately conservative estimate.
-- **Constant price.** Monthly revenue is assumed to stay fixed, with no upgrades or downgrades.
-- **Long-tenured subscribers.** The curve is only reliable where enough subscribers have been observed. The app therefore covers tenures up to 36 months; beyond that the 36-month window needs an explicit extrapolation rule, which is not decided yet.
-- **One curve for everyone.** Until the Cox model is added, the forecast depends only on tenure and price.
+- [JFrog home page][home]
+- [JFrog pricing page][pricing]
+- [JFrog third quarter 2026 earnings call transcript][call]
+- [JFrog Form 10-Q for the third quarter of 2026][10q]
+- [lifelines documentation: survival regression](https://lifelines.readthedocs.io/en/latest/Survival%20Regression.html)
 
----
-
-## 🗺️ Roadmap
-
-- [x] Define the approach
-- [x] Generate synthetic subscriber data
-- [x] Kaplan–Meier baseline and baseline LTV
-- [x] App pages: the problem, Kaplan–Meier, step by step
-- [ ] Fit and validate the Cox model
-- [ ] Personal LTV for every subscriber, compared with the baseline
-- [ ] App pages for the Cox model
+[home]: https://jfrog.com
+[pricing]: https://jfrog.com/pricing/
+[call]: https://s21.q4cdn.com/528621000/files/content_files/JFrog-Third-Quarter-2026-Financial-Results-Conference-Call_Transcript_Corrected.pdf
+[10q]: https://d18rn0p25nwr6d.cloudfront.net/CIK-0001800667/d24cc365-8c8a-4964-b0b4-340de1e9da48.pdf

@@ -19,6 +19,32 @@ TRUE_EFFECTS = {
     "promo_signup": 0.4,
     "weekly_hours": -0.08,
 }
+CHANNELS = list(TRUE_EFFECTS["channel"])
+
+
+def model_features(subscribers: pd.DataFrame) -> pd.DataFrame:
+    """Numeric model inputs: an indicator for every plan and channel except the first, plus promo and usage.
+
+    The first plan and the first channel are the reference that the others are compared with.
+    """
+    columns = {}
+    for feature in ("plan", "channel"):
+        for level in list(TRUE_EFFECTS[feature])[1:]:
+            columns[f"{feature}={level}"] = (subscribers[feature] == level).astype(float)
+    columns["promo_signup"] = subscribers["promo_signup"].astype(float)
+    columns["weekly_hours"] = subscribers["weekly_hours"].astype(float)
+    return pd.DataFrame(columns, index=subscribers.index)
+
+
+def true_log_hazard_ratios() -> pd.Series:
+    """The true effect behind each column of `model_features`."""
+    effects = {}
+    for feature in ("plan", "channel"):
+        for level, effect in list(TRUE_EFFECTS[feature].items())[1:]:
+            effects[f"{feature}={level}"] = effect
+    effects["promo_signup"] = TRUE_EFFECTS["promo_signup"]
+    effects["weekly_hours"] = TRUE_EFFECTS["weekly_hours"]
+    return pd.Series(effects)
 
 
 def generate_subscribers(n: int = 5000, seed: int = 7) -> pd.DataFrame:
@@ -26,7 +52,7 @@ def generate_subscribers(n: int = 5000, seed: int = 7) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
 
     plan = rng.choice(list(PLANS), size=n, p=[0.45, 0.35, 0.20])
-    channel = rng.choice(list(TRUE_EFFECTS["channel"]), size=n, p=[0.5, 0.3, 0.2])
+    channel = rng.choice(CHANNELS, size=n, p=[0.5, 0.3, 0.2])
     promo_signup = rng.random(n) < 0.3
     weekly_hours = rng.gamma(shape=2.0, scale=2.5, size=n).round(1)
 

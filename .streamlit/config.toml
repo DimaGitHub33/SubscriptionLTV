@@ -4,3 +4,9 @@ primaryColor = "#7C3AED"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F5F3FF"
 textColor = "#0F172A"
+
+[global]
+# Send charts in full on every rerun instead of pointing the browser at its cached copy.
+# With the default, moving a slider quickly can reference a copy the browser has already
+# dropped, which ends the session with a "Cached ForwardMsg MISS" connection error.
+minCachedMessageSize = 1e9

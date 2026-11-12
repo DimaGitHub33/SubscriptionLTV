@@ -1,6 +1,11 @@
 """Shared look and feel for every page of the app."""
 
+import math
+
+import pandas as pd
 import streamlit as st
+
+from survival import area_under
 
 PALETTE = {
     "blue": "#2563EB",
@@ -138,6 +143,16 @@ _CSS = """
 
 .note { font-size: 0.9rem; color: var(--faint); text-align: center; }
 
+.chip-row { text-align: center; }
+.chip {
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 999px;
+    border: 2px solid var(--accent);
+    color: var(--accent);
+    font-size: 1.1rem;
+}
+
 @media (max-width: 760px) {
     .hero { padding: 40px 28px; }
     .hero h1 { font-size: 2.2rem; }
@@ -171,3 +186,54 @@ def callout(icon: str, label: str, text: str) -> None:
         </div>
         """
     )
+
+
+def round_half_up(amount: float) -> int:
+    return math.floor(amount + 0.5)
+
+
+def dollars(amount: float) -> str:
+    """Whole dollars, with halves rounded up."""
+    return f"${round_half_up(amount):,}"
+
+
+def displayed_remaining(window: pd.Series) -> tuple[float, float, float]:
+    """Area ahead, share still here today, and the remaining months they give.
+
+    The months are computed from the other two as rounded for display,
+    so the figures on screen divide out exactly as shown.
+    """
+    area = round(area_under(window), 2)
+    still_here = round(window.iloc[0], 4)
+    return area, still_here, round(area / still_here, 1)
+
+
+def remaining_months_tiles(window: pd.Series) -> float:
+    """Show area ÷ share still here = remaining months for a stretch of a survival curve, and return the months."""
+    start, end = window.index[0], window.index[-1]
+    area, still_here, months = displayed_remaining(window)
+    reach = "everyone starts here" if start == 0 else f"reach month {start:g}"
+    st.html(
+        f"""
+        <div class="equation">
+            <div class="term soft">
+                <span class="tag">Area under the curve</span>
+                <div class="value">{area:.2f}</div>
+                <div class="hint">months, from month {start:g} to {end:g}</div>
+            </div>
+            <div class="operator">÷</div>
+            <div class="term" style="--accent: {PALETTE['purple']}">
+                <span class="tag">Still here today</span>
+                <div class="value">{still_here:.2%}</div>
+                <div class="hint">{reach}</div>
+            </div>
+            <div class="operator">=</div>
+            <div class="term" style="--accent: {PALETTE['orange']}">
+                <span class="tag">Remaining months</span>
+                <div class="value">{months:.1f}</div>
+                <div class="hint">expected, for those still here</div>
+            </div>
+        </div>
+        """
+    )
+    return months
