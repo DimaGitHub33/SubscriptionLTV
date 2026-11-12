@@ -76,7 +76,8 @@ flowchart LR
 **3 · Expected months.** The area under the curve is the expected time as a customer. For someone who has already stayed a while, only the months ahead count:
 
 ```text
-Expected remaining months = area under the curve after today ÷ share of customers still here today
+Expected remaining months = area under the curve after today
+                            ÷ share of customers still here today
 ```
 
 **4 · LTV.** Multiply the expected months by the monthly price.
